@@ -1,5 +1,6 @@
 import os
 os.environ['TF_USE_LEGACY_KERAS'] = '1'
+
 import streamlit as st
 import numpy as np
 from PIL import Image
@@ -8,7 +9,7 @@ from datetime import datetime
 import json
 from github import Github
 
-# Labels from Teachable Machine (happy, sad, frustrated)
+# Labels from Teachable Machine
 LABELS = ["happy", "sad", "frustrated"]
 
 # Page configuration
@@ -76,7 +77,7 @@ class GitHubDataStore:
             st.error(f"Error saving to GitHub: {str(e)}")
             return False
 
-# Preprocess image for the model
+# Preprocess image
 def preprocess_image(image):
     image = image.resize((224, 224))
     image_array = np.array(image)
@@ -86,89 +87,104 @@ def preprocess_image(image):
 # Main app
 def main():
     st.title("😊 Emotion Detection App")
-    st.markdown("Upload an image to detect the emotion: **Happy**, **Sad**, or **Frustrated**")
-    
+    st.markdown("Detect emotions (**Happy**, **Sad**, **Frustrated**) from an image or webcam photo.")
+
+    # Sidebar
     with st.sidebar:
         st.header("⚙️ Configuration")
         st.markdown("### GitHub Data Storage")
         github_token = st.text_input(
             "GitHub Personal Access Token",
-            type="password",
-            help="Generate a token at: https://github.com/settings/tokens"
+            type="password"
         )
         repo_name = st.text_input(
-            "Repository (username/repo-name)",
-            help="e.g., yourusername/emotion-data"
+            "Repository (username/repo-name)"
         )
         save_to_github = st.checkbox("Save predictions to GitHub", value=False)
         st.markdown("---")
-        st.markdown("### About")
-        st.info("This app uses a Teachable Machine model to classify emotions from images.")
-    
+        st.info("This app uses a Teachable Machine image model.")
+
     github_store = None
     if save_to_github and github_token and repo_name:
         github_store = GitHubDataStore(github_token, repo_name)
-    
+
     model = load_model()
     if model is None:
-        st.info("Make sure 'keras_model.h5' is in the same directory as this app.")
+        st.info("Ensure 'keras_model.h5' is in the same directory.")
         return
-    
-    uploaded_file = st.file_uploader(
-        "Choose an image...",
-        type=['jpg', 'jpeg', 'png'],
-        help="Upload an image to detect the emotion"
+
+    # Image source selection
+    st.markdown("### 📸 Image Source")
+    image_source = st.radio(
+        "Choose how you want to provide an image:",
+        ["Upload Image", "Use Webcam"]
     )
-    
+
+    uploaded_file = None
+
+    if image_source == "Upload Image":
+        uploaded_file = st.file_uploader(
+            "Upload an image",
+            type=["jpg", "jpeg", "png"]
+        )
+    else:
+        uploaded_file = st.camera_input("Take a photo")
+
+    # Prediction
     if uploaded_file is not None:
         image = Image.open(uploaded_file)
-        
-        col1, col2 = st.columns([1, 1])
-        
+
+        col1, col2 = st.columns(2)
+
         with col1:
-            st.image(image, caption='Uploaded Image', use_container_width=True)
-        
+            st.image(image, caption="Input Image", use_container_width=True)
+
         with col2:
-            with st.spinner('Analyzing emotion...'):
+            with st.spinner("Analyzing emotion..."):
                 processed_image = preprocess_image(image)
                 predictions = model.predict(processed_image, verbose=0)
                 predicted_class = int(np.argmax(predictions[0]))
                 confidence = float(predictions[0][predicted_class])
-                
-                st.markdown("### 🎯 Prediction Results")
-                st.success(f"**Detected Emotion:** {LABELS[predicted_class].upper()}")
+
+                st.markdown("### 🎯 Prediction")
+                st.success(f"**Emotion:** {LABELS[predicted_class].upper()}")
                 st.metric("Confidence", f"{confidence * 100:.2f}%")
-                
-                st.markdown("### 📊 All Probabilities")
+
+                st.markdown("### 📊 Probabilities")
                 for i, label in enumerate(LABELS):
                     prob = float(predictions[0][i])
                     st.progress(prob, text=f"{label.capitalize()}: {prob * 100:.1f}%")
-        
+
+        # Save to GitHub
         if save_to_github and github_store:
             if st.button("💾 Save Prediction to GitHub"):
                 prediction_data = {
-                    'timestamp': datetime.now().isoformat(),
-                    'predicted_emotion': LABELS[predicted_class],
-                    'confidence': confidence,
-                    'all_probabilities': {LABELS[i]: float(predictions[0][i]) for i in range(len(LABELS))}
+                    "timestamp": datetime.now().isoformat(),
+                    "source": image_source.lower().replace(" ", "_"),
+                    "predicted_emotion": LABELS[predicted_class],
+                    "confidence": confidence,
+                    "all_probabilities": {
+                        LABELS[i]: float(predictions[0][i])
+                        for i in range(len(LABELS))
+                    }
                 }
-                with st.spinner('Saving to GitHub...'):
+
+                with st.spinner("Saving to GitHub..."):
                     if github_store.save_prediction(prediction_data):
-                        st.success("✅ Prediction saved to GitHub successfully!")
+                        st.success("✅ Saved successfully!")
                     else:
-                        st.error("❌ Failed to save prediction to GitHub")
-    
-    with st.expander("ℹ️ How to use this app"):
+                        st.error("❌ Failed to save prediction.")
+
+    # Help section
+    with st.expander("ℹ️ How to use"):
         st.markdown("""
-        1. **Upload an Image**: Click on the upload button and select an image
-        2. **View Results**: The app will display the detected emotion and confidence score
-        3. **Configure GitHub** (Optional):
-           - Create a GitHub Personal Access Token with 'repo' scope
-           - Enter your token and repository name in the sidebar
-           - Enable "Save predictions to GitHub"
-           - Click "Save Prediction to GitHub" button after each prediction
-        
-        **Note**: Your predictions will be stored in a `predictions.json` file in your GitHub repository.
+        **Steps**
+        1. Choose **Upload Image** or **Use Webcam**
+        2. Provide an image
+        3. View detected emotion and confidence
+        4. (Optional) Save prediction to GitHub
+
+        Predictions are stored in `predictions.json` in your repository.
         """)
 
 if __name__ == "__main__":
