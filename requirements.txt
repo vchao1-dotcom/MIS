@@ -1,0 +1,6 @@
+streamlit
+tensorflow-cpu
+tf-keras
+Pillow
+numpy
+PyGithub
